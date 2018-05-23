@@ -129,14 +129,17 @@ void addModule(const std::string& modName,
   //   cout << "\t" << id2cstr(w.first) << ", port_id = " << w.second->port_id << endl;
   // }
   
+  cout << "adding module: " << modName << endl;
   cout << "Ports" << endl;
   for (auto& conn : rmod->ports) {
     cout << "\t" << id2cstr(conn) << endl;
   }
 
   cout << "Parameters" << endl;
+  CoreIR::Params params;
   for (auto& param : rmod->avail_parameters) {
     cout << "\t" << id2cstr(param) << endl;
+    params[id2cstr(param)] = c->Int(); //Assume it is always an int for now
   }
       
   cout << "# of Connections in " << id2cstr(rmod->name) << " = " << rmod->connections().size() << endl;
@@ -152,8 +155,10 @@ void addModule(const std::string& modName,
   vector<pair<string, Type*> > args;
 
   //cout << "Wires" << endl;
-  for (auto &wire_iter : rmod->wires_) {
-    RTLIL::Wire *wire = wire_iter.second;
+  //for (auto &wire_iter : rmod->wires_) {
+  for (auto &port_name : rmod->ports) {
+
+    RTLIL::Wire *wire = rmod->wires_[port_name];
     //cout << "\t" << id2cstr(wire->name) << ", port in = " << wire->port_input << ", port out = " << wire->port_output << ", width = " << wire->width << endl;
 
     if (wire->port_output) {
@@ -186,11 +191,20 @@ void addModule(const std::string& modName,
     }
 
   }
-
-  modMap[modName] =
-    g->newModuleDecl(modName, c->Record(args));
-
-
+  
+  if (params.size()>0) {
+    //This is a generator 
+    if (!g->hasGenerator(modName)) {
+      g->newGeneratorDecl(modName,TypeGenImplicit::make(g,modName,params),params);
+    }
+    else {
+      assert(g->getGenerator(modName)->getGenParams()==params);
+    }
+  }
+  else {
+    modMap[modName] = g->newModuleDecl(modName, c->Record(args));
+  }
+    
 }
 
 std::map<string, CoreIR::Module*>
@@ -238,6 +252,7 @@ void print_cell_info(RTLIL::Cell* const cell) {
 
 }
 
+/*
 bool addGeneratedModule(RTLIL::Module* const rmod,
                         std::map<string, CoreIR::Module*>& modMap,
                         CoreIR::Context* const c,
@@ -268,8 +283,8 @@ bool addGeneratedModule(RTLIL::Module* const rmod,
 
       string instName = coreirSafeName(cellName);
 
-      string cellTypeStr = id2cstr(cell->type);
-      if (modMap.find(cellTypeStr) == end(modMap)) {
+      string modRefName = id2cstr(cell->type);
+      if (modMap.find(modRefName) == end(modMap)) {
         cout << "Unsupported Cell type = " << id2cstr(cell->name) << " : " << id2cstr(cell->type) << ", skipping." << endl;
 
         print_cell_info(cell);
@@ -316,6 +331,7 @@ bool addGeneratedModule(RTLIL::Module* const rmod,
 
   return false;
 }
+*/
 
 map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
                                        std::map<string, CoreIR::Module*>& modMap,
@@ -326,14 +342,24 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
   map<Cell*, Instance*> instMap;
   for (auto& cell_iter : rmod->cells_) {
     Cell* cell = cell_iter.second;
+    cout << "celltype=" << RTLIL::id2cstr(cell->type) << endl;
+    bool is_external = false;
+    string ext_namespace;
+    for (auto apair : cell->attributes) {
+      if (RTLIL::id2cstr(apair.first)=="namespace") {
+        ext_namespace = apair.second.decode_string();
+        is_external = true;
+        cout << "Found cell with external namespace! " << ext_namespace;
+      }
+    }
 
     string cellTp = RTLIL::id2cstr(cell->type);
     string cellName = RTLIL::id2cstr(cell->name);
-        
+    string instName = coreirSafeName(cellName);
+
     if (isRTLILBinop(cellTp)) {
       string opName = cellTp.substr(1, cellTp.size());
       //cout << "opName = " << opName << endl;
-      string instName = coreirSafeName(cellName);
 
       int widthA = getIntParam(cell, "\\A_WIDTH");
       int widthB = getIntParam(cell, "\\B_WIDTH");
@@ -354,7 +380,6 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
     } else if (isRTLILUnop(cellTp)) {
       string opName = cellTp.substr(1, cellTp.size());
       //cout << "opName = " << opName << endl;
-      string instName = coreirSafeName(cellName);
 
       int widthA = getIntParam(cell, "\\A_WIDTH");
       int widthY = getIntParam(cell, "\\Y_WIDTH");
@@ -370,7 +395,6 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
     } else if (cellTp == "$mux") {
       string opName = cellTp.substr(1, cellTp.size());
       //cout << "opName = " << opName << endl;
-      string instName = coreirSafeName(cellName);
 
       int width = getIntParam(cell, "\\WIDTH");
 
@@ -382,7 +406,6 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
       
     } else if (cellTp == "$dlatch") {
 
-      string instName = coreirSafeName(cellName);
 
       int width = getIntParam(cell, "\\WIDTH");
       int polarity = getIntParam(cell, "\\EN_POLARITY");
@@ -395,7 +418,6 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
 
     } else if (cellTp == "$dff") {
 
-      string instName = coreirSafeName(cellName);
 
       int width = getIntParam(cell, "\\WIDTH");
       int polarity = getIntParam(cell, "\\CLK_POLARITY");
@@ -408,7 +430,6 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
 
     } else if (cellTp == "$dffsr") {
 
-      string instName = coreirSafeName(cellName);
 
       int width = getIntParam(cell, "\\WIDTH");
       int clk_polarity = getIntParam(cell, "\\CLK_POLARITY");
@@ -424,7 +445,6 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
       instMap[cell] = inst;
 
     } else if (cellTp == "$shiftx") {
-      string instName = coreirSafeName(cellName);
 
       int a_width = getIntParam(cell, "\\A_WIDTH");
       int a_signed = getIntParam(cell, "\\A_SIGNED");
@@ -443,7 +463,6 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
 
     } else if (cellTp == "$adff") {
 
-      string instName = coreirSafeName(cellName);
 
       int width = getIntParam(cell, "\\WIDTH");
       int polarity = getIntParam(cell, "\\CLK_POLARITY");
@@ -471,33 +490,47 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
 
       instMap[cell] = inst;
     } else {
+      
+      RecordParams cellrp;
 
-      string instName = coreirSafeName(cellName);
 
-      string cellTypeStr = coreirSafeName(id2cstr(cell->type));
-      if (modMap.find(cellTypeStr) == end(modMap)) {
-        cout << "Unsupported Cell type when building instance map = " << id2cstr(cell->name) << " : " << id2cstr(cell->type) << ", skipping." << endl;
+      bool is_generator = cell->parameters.size() == 0;
 
-        print_cell_info(cell);
+      cout << "CellType=" << id2cstr(cell->type) << endl;
+      string modRefName = id2cstr(cell->type);
+      Module* modRef;
+      Namespace* nsref = g;
+      if (is_external) {
+        nsref = c->getLibraryManager()->loadLib(ext_namespace);
+      }
 
-        assert(false);
-      } else {
-
-        if (cell->parameters.size() == 0) {
-
-          auto inst = def->addInstance(instName, modMap[coreirSafeName(cellTypeStr)]);
-          instMap[cell] = inst;
-        } else {
-
+      if (!is_generator) {
+        if (is_external) {
+          modRef = nsref->getModule(modRefName);
+        }
+        else {
+          assert(modMap.count(modRefName)>0);
+          modRef = modMap[modRefName]
+        }
+      }
+      else { //is a generator
+        CoreIR::Values inst_args;
+        for (auto ppair : cell->parameters) {
+          string argname = id2cstr(ppair.first);
+          instArgs[argname] = CoreIR::Const::make(c,ppair.second.as_int);
+        }
+        if (is_external) {
+          modRef = nsref->getGenerator(modRefName)->getModule(instArgs);
+        }
+        else {
           RTLIL::Module* containerMod = cell->module;
           Design* rtd = containerMod->design;
 
           RTLIL::Module* rtmod = rtd->modules_[cell->type];
           cout << "RTMOD = " << id2cstr(rtmod->name) << endl;
 
-          auto modInstNameR = rtmod->derive(rtmod->design, cell->parameters);
+          RTLIL::IdString modInstNameR = rtmod->derive(rtmod->design, cell->parameters);
 
-          string modInstName = coreirSafeName(id2cstr(modInstNameR));
           cout << "Derived module instance name = " << modInstName << endl;
 
           if (modMap.find(modInstName) == end(modMap)) {
@@ -508,6 +541,25 @@ map<Cell*, Instance*> buildInstanceMap(RTLIL::Module* const rmod,
 
             cout << "Generated module " << id2cstr(genMod->name) << " has " << genMod->avail_parameters.size() << " parameters" << endl;
           }
+
+        }
+      }
+ 
+
+      if (modMap.find(modRefName) == end(modMap)) {
+        cout << "Unsupported Cell type when building instance map = " << id2cstr(cell->name) << " : " << id2cstr(cell->type) << ", skipping." << endl;
+
+        print_cell_info(cell);
+
+        assert(false);
+      } else {
+
+        if (cell->parameters.size() == 0) {
+
+          auto inst = def->addInstance(instName, modMap[coreirSafeName(modRefName)]);
+          instMap[cell] = inst;
+        } else {
+
 
           auto inst = def->addInstance(instName, modMap[coreirSafeName(modInstName)]);
           instMap[cell] = inst;
