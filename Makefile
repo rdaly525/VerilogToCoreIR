@@ -4,7 +4,9 @@ all: test
 
 
 test: write_coreir.so
-	yosys -p "write_coreir" -m ./write_coreir.so smax.v
+	yosys -p "write_coreir" -m ./write_coreir.so smax1.v
+	yosys -p "write_coreir" -m ./write_coreir.so smax2.v
+	yosys -p "write_coreir" -m ./write_coreir.so smax3.v
 	#yosys -p "hierarchy; proc; memory -nomap; pmuxtree; to_coreir" -m ./to_coreir.so ./test/samples/io1bit/io1bit.v
 	#yosys -p "proc; memory; pmuxtree; to_coreir" -m ./to_coreir.so ./test/samples/inout_inst/inout_inst.v
 	#yosys -p "proc; memory; pmuxtree; to_coreir" -m ./to_coreir.so ./test/samples/cb_unq1/cb_unq1.v

@@ -170,6 +170,7 @@ struct CoreIRWriter {
   void addModule(RTLIL::IdString rmodName, dict<RTLIL::IdString, RTLIL::Const> rparams, set<RTLIL::IdString>& completed) {
     RTLIL::Module* rmod = design->module(rmodName);
     string cmodName = id2cstr(rmod->name);
+    cout << "{ adding Module " << cmodName << endl;
 
     bool is_generator = rparams.size()>0;
     //Check parameters are same as avail_params
@@ -256,6 +257,10 @@ struct CoreIRWriter {
     //Now go through all cells, and add all the 'generated' modules
     for (auto& cell_iter : rmod->cells_) {
       Cell* cell = cell_iter.second;
+      if (cell->type[0] == '$') {
+        cout << "not processing " << id2cstr(cell->type) << endl;
+        continue;
+      }
       bool is_generator = cell->parameters.size() > 0;
       cout << "celltype=" << RTLIL::id2cstr(cell->type) << endl;
       bool is_external = false;
@@ -297,6 +302,7 @@ struct CoreIRWriter {
         this->addModule(rgenName,cell->parameters,completed);
       }
     } //end cell for loop
+    cout << "} adding Module " << cmodName << endl;
   }
 
   void buildModuleMap() {
@@ -1232,13 +1238,21 @@ struct WriteCoreIRPass : public Yosys::Pass {
 
     assert(corewriter.modMap.size() > 0);
 
-    //c->runPasses({"deletedeadinstances"});
+    cout << "Modules after running instance maps" << endl;
+    c->runPasses({"packconnections"});
+    
     RTLIL::Module* rtop = design->top_module();
+    CoreIR::Module* top = nullptr;
+    string fileName = "";
+    if (rtop) {
+      CoreIR::Module* top = corewriter.modMap[rtop->name];
+      assert(top);
+      fileName = top->getName() + ".json";
+    }
+    else {
+      fileName = "_top.json";
+    }
 
-
-    CoreIR::Module* top = corewriter.modMap[rtop->name];
-
-    string fileName = top->getName() + ".json";
     cout << "Saving to " << fileName << endl;
     if (!saveToFile(g, fileName, top)) {
       cout << "Could not save to json!!" << endl;
