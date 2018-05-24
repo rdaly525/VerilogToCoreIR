@@ -152,6 +152,9 @@ struct CoreIRWriter {
   //This is for external ones
   std::map<RTLIL::Cell*, CoreIR::Module*> externalMap;
   
+  std::map<RTLIL::IdString,std::string> gennameMap;
+
+
   CoreIRWriter(Context* c, Namespace* ns, RTLIL::Design* design) : c(c), ns(ns), design(design) {}
 
   CoreIR::Module* getModuleRef(RTLIL::Cell* cell) {
@@ -170,9 +173,17 @@ struct CoreIRWriter {
   void addModule(RTLIL::IdString rmodName, dict<RTLIL::IdString, RTLIL::Const> rparams, set<RTLIL::IdString>& completed) {
     RTLIL::Module* rmod = design->module(rmodName);
     string cmodName = id2cstr(rmod->name);
-    cout << "{ adding Module " << cmodName << endl;
+    if (gennameMap.count(rmod->name)) {
+      cmodName = gennameMap[rmod->name];
+    }
 
+    cout << "{ adding Module " << cmodName << endl;
     bool is_generator = rparams.size()>0;
+    if (!is_generator && rmod->avail_parameters.size()>0) {
+      cout << "} abstract gen" << endl;
+      return;
+    }
+    
     //Check parameters are same as avail_params
     CoreIR::Params cparams;
     CoreIR::Values cargs;
@@ -182,7 +193,9 @@ struct CoreIRWriter {
       cargs[id2cstr(ppair.first)] = CoreIR::Const::make(c,ppair.second.as_int());
       cparams[id2cstr(ppair.first)] = c->Int(); 
     }
+    cout << " with args = " << CoreIR::toString(cargs) << endl;
     for (auto aparam : rmod->avail_parameters) {
+      cout << "aparam: " << id2cstr(aparam) << endl;
       assert(rparams.count(aparam)>0);
     }
 
@@ -298,6 +311,7 @@ struct CoreIRWriter {
         cout << "RTMOD = " << id2cstr(rtmod->name) << endl;
 
         RTLIL::IdString rgenName = rtmod->derive(rtmod->design, cell->parameters);
+        gennameMap[rgenName] = id2cstr(cell->type);
         cell->type = rgenName;
         this->addModule(rgenName,cell->parameters,completed);
       }
@@ -1165,8 +1179,17 @@ struct WriteCoreIRPass : public Yosys::Pass {
   virtual void execute(std::vector<std::string> args, RTLIL::Design *design) {
 
     cout << "String list" << endl;
-    for (auto str : args) {
-      cout << "\t" << str << endl;
+    vector<string>::iterator argiter;
+    string topname = "_top";
+    for (argiter = args.begin(); argiter != args.end(); argiter++) {
+      if (*argiter == "-top") {
+        argiter++;
+        if (argiter == args.end()) {
+          cout << "Did not specify a top!" << endl;
+        }
+        topname = *argiter;
+        cout << "setting top to " << topname << endl;
+      }
     }
 
     Context* c = newContext();
@@ -1239,22 +1262,11 @@ struct WriteCoreIRPass : public Yosys::Pass {
     assert(corewriter.modMap.size() > 0);
 
     cout << "Modules after running instance maps" << endl;
-    c->runPasses({"packconnections"});
+    c->runPasses({"packbitconstants","packconnections"});
     
-    RTLIL::Module* rtop = design->top_module();
-    CoreIR::Module* top = nullptr;
-    string fileName = "";
-    if (rtop) {
-      CoreIR::Module* top = corewriter.modMap[rtop->name];
-      assert(top);
-      fileName = top->getName() + ".json";
-    }
-    else {
-      fileName = "_top.json";
-    }
-
+    string fileName = topname + ".json";
     cout << "Saving to " << fileName << endl;
-    if (!saveToFile(g, fileName, top)) {
+    if (!saveToFile(g, fileName, nullptr)) {
       cout << "Could not save to json!!" << endl;
       c->die();
     }
