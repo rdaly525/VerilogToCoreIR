@@ -169,6 +169,31 @@ struct CoreIRWriter {
     return nullptr;
   }
 
+  bool isInput(RTLIL::Cell* cell, RTLIL::IdString port) {
+    if (externalMap.count(cell)) {
+      RecordType* type = externalMap.at(cell)->getType();
+      string pname = id2cstr(port);
+      ASSERT(type->canSel(pname),"missing port: " + pname);
+      return type->sel(pname)->isInput();
+    }
+    else {
+      return cell->input(port);
+    }
+  }
+  
+  bool isOutput(RTLIL::Cell* cell, RTLIL::IdString port) {
+    if (externalMap.count(cell)) {
+      RecordType* type = externalMap.at(cell)->getType();
+      string pname = id2cstr(port);
+      ASSERT(type->canSel(pname),"missing port: " + pname);
+      return type->sel(pname)->isOutput();
+    }
+    else {
+      return cell->output(port);
+    }
+  }
+
+
   //This is for adding internal modules
   void addModule(RTLIL::IdString rmodName, dict<RTLIL::IdString, RTLIL::Const> rparams, set<RTLIL::IdString>& completed) {
     RTLIL::Module* rmod = design->module(rmodName);
@@ -565,7 +590,7 @@ struct CoreIRWriter {
     dict<SigBit, string> sigbit_to_driver_port_index;
     for (auto cell : rmod->cells()) {
       for (auto conn : cell->connections()) {
-        if (cell->output(conn.first)) {
+        if (isOutput(cell,conn.first)) {
           for (auto bit : sigmap(conn.second)) {
             sigbit_to_driver_index[bit] = cell;
             sigbit_to_driver_port_index[bit] = id2cstr(conn.first);
@@ -578,7 +603,7 @@ struct CoreIRWriter {
     dict<SigBit, string> sigbit_to_receiver_port_index;
     for (auto cell : rmod->cells()) {
       for (auto conn : cell->connections()) {
-        if (cell->input(conn.first)) {
+        if (isInput(cell,conn.first)) {
           for (auto bit : sigmap(conn.second)) {
             sigbit_to_receiver_index[bit] = cell;
             sigbit_to_receiver_port_index[bit] = id2cstr(conn.first);
@@ -653,11 +678,16 @@ struct CoreIRWriter {
     dict<SigBit, int> sigbit_to_driver_offset;
 
     for (auto cell : rmod->cells()) {
+      cout << "cellname= " << id2cstr(cell->name) << endl;
       for (auto conn : cell->connections()) {
-        if (cell->output(conn.first)) {
-
+        cout << "  conn= " << id2cstr(conn.first) << endl;
+        
+        
+        if (isOutput(cell,conn.first)) {
+          cout << " Is output!" << endl;
           int i = 0;
           for (auto bit : sigmap(conn.second)) {
+            cout << "  adding bit " << i << endl;
             sigbit_to_driver_index[bit] = cell;
             sigbit_to_driver_port_index[bit] = id2cstr(conn.first);
             sigbit_to_driver_offset[bit] = i;
@@ -682,9 +712,11 @@ struct CoreIRWriter {
     }
 
     for (auto wire : rmod->wires()) {
-      if (wire->port_input && !wire->port_output) {
+      string name = id2cstr(wire->name);
+      if ((wire->port_input && !wire->port_output) || name=="in1" || name=="in2") {
         int i = 0;
         for (auto bit : sigmap(wire)) {
+          cout << "adding input bit " << i << endl;
           sigbit_to_driver_port_index[bit] = id2cstr(wire->name);
           sigbit_to_driver_offset[bit] = i;
           i++;
@@ -716,13 +748,14 @@ struct CoreIRWriter {
     cout << "Adding input to driver connections" << endl;
     // Add connections from inputs to drivers
     for (auto cell : rmod->cells()) {
-      //cout << "Cell = " << id2cstr(cell->name) << endl;
+      cout << "Cell = " << id2cstr(cell->name) << endl;
       for (auto conn : cell->connections()) {
-        //cout << "Conn = " << id2cstr(conn.first) << endl;
-        if (cell->input(conn.first)) {
-
-          if (cell->output(conn.first)) {
-            //cout << "Cell " << id2cstr(cell->name) << "." << id2cstr(conn.first) << " is an io port" << endl;
+        string portname = id2cstr(conn.first);
+        cout << "Conn = " << id2cstr(conn.first) << endl;
+        if (isInput(cell,conn.first)) {
+          cout << "  input" << endl;
+          if (cell->output(conn.first)) { // This means it is an IOnOut. TODO for external cells
+            cout << "Cell " << id2cstr(cell->name) << "." << id2cstr(conn.first) << " is an io port" << endl;
 
             int i = 0;
             for (auto bit : sigmap(conn.second)) {
@@ -930,7 +963,7 @@ struct CoreIRWriter {
         for (auto bit : sigmap(wire)) {
 
           if (bit.wire != nullptr) {
-            //cout << "Bit wire = " << id2cstr(bit.wire->name) << ", offset = " << bit.offset << endl;
+            cout << "Bit wire = " << id2cstr(bit.wire->name) << ", offset = " << bit.offset << endl;
 
             if (bit.wire->port_input && bit.wire->port_output) {
               // Maybe move this outside the bit loop
@@ -987,7 +1020,7 @@ struct CoreIRWriter {
               def->connect(from, to);
             } else {
               cout << "ERROR: No port for " << id2cstr(wire->name) << endl;
-              //assert(false);
+              assert(false);
             }
           } else {
 
