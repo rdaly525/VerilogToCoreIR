@@ -193,6 +193,16 @@ struct CoreIRWriter {
     }
   }
 
+  CoreIR::Value* getValue(RTLIL::Const rval,string argname, map<string,string>& paramTypes) {
+    if (paramTypes.count(argname)) {
+      string paramType = paramTypes.at(argname);
+      if (paramType=="Bool") {
+        return CoreIR::Const::make(c,(bool) rval.as_int());
+      }
+      ASSERT(0,"Cannot handle type: " + paramType + " for arg " + argname);
+    }
+    return CoreIR::Const::make(c,rval.as_int());
+  }
 
   //This is for adding internal modules
   void addModule(RTLIL::IdString rmodName, dict<RTLIL::IdString, RTLIL::Const> rparams, set<RTLIL::IdString>& completed) {
@@ -303,12 +313,22 @@ struct CoreIRWriter {
       cout << "celltype=" << RTLIL::id2cstr(cell->type) << endl;
       bool is_external = false;
       string ext_namespace;
+      map<string,string> paramTypes;
       for (auto apair : cell->attributes) {
-        if (RTLIL::id2cstr(apair.first)==string("namespace")) {
+        if (RTLIL::id2cstr(apair.first)==string("libpath")) {
+          string libpath = apair.second.decode_string();
+          cout << "adding path " << libpath << endl;
+          c->getLibraryManager()->addSearchPath(libpath);
+        }
+        else if (RTLIL::id2cstr(apair.first)==string("namespace")) {
           ext_namespace = apair.second.decode_string();
           is_external = true;
           cout << "Found cell with external namespace! " << ext_namespace << endl;
         }
+        else {
+          paramTypes[RTLIL::id2cstr(apair.first)] = apair.second.decode_string();
+        }
+
       }
 
       //If cell is external, get the module and save in externalMap
@@ -320,7 +340,7 @@ struct CoreIRWriter {
           CoreIR::Values genargs;
           for (auto ppair : cell->parameters) {
             string argname = id2cstr(ppair.first);
-            genargs[argname] = CoreIR::Const::make(c,ppair.second.as_int());
+            genargs[argname] = getValue(ppair.second,argname,paramTypes);
           }
           externalMap[cell] = nsRef->getGenerator(modRefName)->getModule(genargs);
         }
@@ -576,6 +596,18 @@ struct CoreIRWriter {
 
       return port;
     }
+    else if (port->getType() == c->Named("coreir.clkIn")) {
+      ModuleDef* def = inst->getContainer();
+      Instance* clkwrap = def->addInstance("clk2" + inst->getInstname(),"coreir.wrap",{{"type",CoreIR::Const::make(c,c->Named("coreir.clk"))}});
+      def->connect(clkwrap->sel("out"),port);
+      return clkwrap->sel("in");
+    }
+    else if (port->getType() == c->Named("coreir.clk")) {
+      ModuleDef* def = inst->getContainer();
+      Instance* clkwrap = def->addInstance("clk2" + inst->getInstname(),"coreir.strip",{{"type",CoreIR::Const::make(c,c->Named("coreir.clk"))}});
+      def->connect(clkwrap->sel("in"),port);
+      return clkwrap->sel("out");
+    }
 
     auto portBit = port->sel(wireOffset);
 
@@ -797,14 +829,16 @@ struct CoreIRWriter {
                 }
 
                 string port = sigbit_to_driver_port_index[bit];
-                //cout << "port = " << port << endl;
+                cout << "port = " << port << endl;
+                cout << "HERE1" << port << endl;
 
                 // From driver to the current bit
                 Select* to = instanceSelect(cell,
                                             id2cstr(conn.first),
                                             i,
                                             instMap);
-                //cout << "to = " << to->toString() << endl;
+                cout << "HERE2" << port << endl;
+                cout << "to = " << to->toString() << endl;
 
                 Select* from = nullptr;
                 if (driver != nullptr) {
