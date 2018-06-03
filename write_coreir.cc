@@ -199,6 +199,9 @@ struct CoreIRWriter {
       if (paramType=="Bool") {
         return CoreIR::Const::make(c,(bool) rval.as_int());
       }
+      else if (paramType=="Int") {
+        return CoreIR::Const::make(c,(int) rval.as_int());
+      }
       ASSERT(0,"Cannot handle type: " + paramType + " for arg " + argname);
     }
     return CoreIR::Const::make(c,rval.as_int());
@@ -212,10 +215,8 @@ struct CoreIRWriter {
       cmodName = gennameMap[rmod->name];
     }
 
-    cout << "{ adding Module " << cmodName << endl;
     bool is_generator = rparams.size()>0;
     if (!is_generator && rmod->avail_parameters.size()>0) {
-      cout << "} abstract gen" << endl;
       return;
     }
     
@@ -228,9 +229,7 @@ struct CoreIRWriter {
       cargs[id2cstr(ppair.first)] = CoreIR::Const::make(c,ppair.second.as_int());
       cparams[id2cstr(ppair.first)] = c->Int(); 
     }
-    cout << " with args = " << CoreIR::toString(cargs) << endl;
     for (auto aparam : rmod->avail_parameters) {
-      cout << "aparam: " << id2cstr(aparam) << endl;
       assert(rparams.count(aparam)>0);
     }
 
@@ -310,7 +309,6 @@ struct CoreIRWriter {
         continue;
       }
       bool is_generator = cell->parameters.size() > 0;
-      cout << "celltype=" << RTLIL::id2cstr(cell->type) << endl;
       bool is_external = false;
       string ext_namespace;
       map<string,string> paramTypes;
@@ -320,13 +318,15 @@ struct CoreIRWriter {
           cout << "adding path " << libpath << endl;
           c->getLibraryManager()->addSearchPath(libpath);
         }
-        else if (RTLIL::id2cstr(apair.first)==string("namespace")) {
+        else if (RTLIL::id2cstr(apair.first)==string("lib")) {
           ext_namespace = apair.second.decode_string();
           is_external = true;
           cout << "Found cell with external namespace! " << ext_namespace << endl;
         }
         else {
-          paramTypes[RTLIL::id2cstr(apair.first)] = apair.second.decode_string();
+          string attr = RTLIL::id2cstr(apair.first);
+          cout << "found attr " << attr << endl;
+          paramTypes[attr] = apair.second.decode_string();
         }
 
       }
@@ -353,6 +353,7 @@ struct CoreIRWriter {
         Design* rtd = containerMod->design;
 
         RTLIL::Module* rtmod = rtd->modules_[cell->type];
+        ASSERT(rtmod,"external mod: " + string(id2cstr(cell->type)) + " does not exist");
         cout << "RTMOD = " << id2cstr(rtmod->name) << endl;
 
         RTLIL::IdString rgenName = rtmod->derive(rtmod->design, cell->parameters);
@@ -361,7 +362,7 @@ struct CoreIRWriter {
         this->addModule(rgenName,cell->parameters,completed);
       }
     } //end cell for loop
-    cout << "} adding Module " << cmodName << endl;
+    //cout << "} adding Module " << cmodName << endl;
   }
 
   void buildModuleMap() {
@@ -719,7 +720,7 @@ struct CoreIRWriter {
           cout << " Is output!" << endl;
           int i = 0;
           for (auto bit : sigmap(conn.second)) {
-            cout << "  adding bit " << i << endl;
+            //cout << "  adding bit " << i << endl;
             sigbit_to_driver_index[bit] = cell;
             sigbit_to_driver_port_index[bit] = id2cstr(conn.first);
             sigbit_to_driver_offset[bit] = i;
@@ -748,7 +749,7 @@ struct CoreIRWriter {
       if ((wire->port_input && !wire->port_output) || name=="in1" || name=="in2") {
         int i = 0;
         for (auto bit : sigmap(wire)) {
-          cout << "adding input bit " << i << endl;
+          //cout << "adding input bit " << i << endl;
           sigbit_to_driver_port_index[bit] = id2cstr(wire->name);
           sigbit_to_driver_offset[bit] = i;
           i++;
@@ -830,14 +831,12 @@ struct CoreIRWriter {
 
                 string port = sigbit_to_driver_port_index[bit];
                 cout << "port = " << port << endl;
-                cout << "HERE1" << port << endl;
 
                 // From driver to the current bit
                 Select* to = instanceSelect(cell,
                                             id2cstr(conn.first),
                                             i,
                                             instMap);
-                cout << "HERE2" << port << endl;
                 cout << "to = " << to->toString() << endl;
 
                 Select* from = nullptr;

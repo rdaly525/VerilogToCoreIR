@@ -7,7 +7,7 @@ module top4(
   wire [15:0] tmp;
   assign tmp = in;
 
-  (* namespace="coreir" *)
+  (* lib="coreir",width="Int" *)
   \reg #(.width(16)) reg_inst(
     .in(tmp),
     .out(out),
