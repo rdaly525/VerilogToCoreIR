@@ -192,17 +192,39 @@ struct CoreIRWriter {
       return cell->output(port);
     }
   }
-
-  CoreIR::Value* getValue(RTLIL::Const rval,string argname, map<string,string>& paramTypes) {
+  CoreIR::Value* castValue(CoreIR::Value* val, CoreIR::ValueType* kind) {
+    if (val->getValueType() == kind) {
+      return val;
+    }
+    if (kind == c->Int() && isa<BitVectorType>(val->getValueType())) {
+      return CoreIR::Const::make(c,(int) val->get<bsim::quad_value_bit_vector>().as_native_int32());
+    }
+    ASSERT(0, "NYI");
+  }
+  CoreIR::Value* getValue(RTLIL::Const rval,string argname="", map<string,string> paramTypes=map<string,string>()) {
+    cout << "getting value from " << argname << endl;
     if (paramTypes.count(argname)) {
       string paramType = paramTypes.at(argname);
       if (paramType=="Bool") {
-        return CoreIR::Const::make(c,(bool) rval.as_int());
+        return CoreIR::Const::make(c,rval.as_bool());
       }
       else if (paramType=="Int") {
         return CoreIR::Const::make(c,(int) rval.as_int());
       }
       ASSERT(0,"Cannot handle type: " + paramType + " for arg " + argname);
+    }
+    else {
+      if ((rval.flags & RTLIL::CONST_FLAG_STRING) !=0) {
+        return CoreIR::Const::make(c, rval.decode_string());
+      }
+      else if (rval.flags == RTLIL::CONST_FLAG_NONE || rval.flags == RTLIL::CONST_FLAG_SIGNED) {
+        cout << "HERE!" << endl;
+        int numbits = rval.size();
+        string bvval = rval.as_string();
+        auto bv = bsim::quad_value_bit_vector(numbits,bvval);
+        return CoreIR::Const::make(c,bv);
+      }
+      ASSERT(0,"Cannot handle arg: " + argname + " flags = " + to_string(rval.flags));
     }
     return CoreIR::Const::make(c,rval.as_int());
   }
@@ -223,11 +245,14 @@ struct CoreIRWriter {
     //Check parameters are same as avail_params
     CoreIR::Params cparams;
     CoreIR::Values cargs;
+
+    map<string,string> ptypesTemp;
     for (auto ppair : rparams) {
       assert(rmod->avail_parameters.count(ppair.first)>0);
       //TODO assume all params are int for now
-      cargs[id2cstr(ppair.first)] = CoreIR::Const::make(c,ppair.second.as_int());
-      cparams[id2cstr(ppair.first)] = c->Int(); 
+      CoreIR::Value* argval = getValue(ppair.second);
+      cargs[id2cstr(ppair.first)] = argval;
+      cparams[id2cstr(ppair.first)] = argval->getValueType();
     }
     for (auto aparam : rmod->avail_parameters) {
       assert(rparams.count(aparam)>0);
@@ -340,7 +365,8 @@ struct CoreIRWriter {
           CoreIR::Values genargs;
           for (auto ppair : cell->parameters) {
             string argname = id2cstr(ppair.first);
-            genargs[argname] = getValue(ppair.second,argname,paramTypes);
+            CoreIR::Value* val = getValue(ppair.second,argname,paramTypes);
+            genargs[argname] = castValue(val,nsRef->getGenerator(modRefName)->getGenParams().at(argname));
           }
           externalMap[cell] = nsRef->getGenerator(modRefName)->getModule(genargs);
         }
